@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
-const anime = require('animejs');
+import { animate, stagger } from 'animejs';
 import { Car, Shield, Zap, AlertTriangle } from 'lucide-react';
 
 const CrashDetection = () => {
@@ -10,8 +10,7 @@ const CrashDetection = () => {
   useEffect(() => {
     // Anime.js animations
     if (titleRef.current) {
-      anime({
-        targets: titleRef.current,
+      animate(titleRef.current, {
         translateY: [50, 0],
         opacity: [0, 1],
         duration: 1000,
@@ -21,12 +20,11 @@ const CrashDetection = () => {
     }
 
     if (cardsRef.current) {
-      anime({
-        targets: cardsRef.current.children,
+      animate(cardsRef.current.children, {
         translateY: [30, 0],
         opacity: [0, 1],
         duration: 800,
-        delay: anime.stagger(200, { start: 600 }),
+        delay: stagger(200, { start: 600 }),
         easing: 'easeOutQuad'
       });
     }

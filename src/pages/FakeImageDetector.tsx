@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
-const anime = require('animejs');
+import { animate, stagger } from 'animejs';
 import { Eye, Shield, Scan, AlertCircle } from 'lucide-react';
 
 const FakeImageDetector = () => {
@@ -10,8 +10,7 @@ const FakeImageDetector = () => {
   useEffect(() => {
     // Anime.js animations
     if (titleRef.current) {
-      anime({
-        targets: titleRef.current,
+      animate(titleRef.current, {
         translateY: [60, 0],
         opacity: [0, 1],
         duration: 1200,
@@ -21,12 +20,11 @@ const FakeImageDetector = () => {
     }
 
     if (cardsRef.current) {
-      anime({
-        targets: cardsRef.current.children,
+      animate(cardsRef.current.children, {
         scale: [0.8, 1],
         opacity: [0, 1],
         duration: 600,
-        delay: anime.stagger(150, { start: 500 }),
+        delay: stagger(150, { start: 500 }),
         easing: 'easeOutBack'
       });
     }
