@@ -1,18 +1,63 @@
-import { defineConfig } from "vite";
-import react from "@vitejs/plugin-react-swc";
-import path from "path";
-import { componentTagger } from "lovable-tagger";
+import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
+import { VitePWA } from 'vite-plugin-pwa';
+import path from 'path';
 
-// https://vitejs.dev/config/
-export default defineConfig(({ mode }) => ({
-  server: {
-    host: "::",
-    port: 8080,
-  },
-  plugins: [react(), mode === "development" && componentTagger()].filter(Boolean),
+export default defineConfig({
   resolve: {
     alias: {
-      "@": path.resolve(__dirname, "./src"),
+      '@': path.resolve(__dirname, 'src'),
     },
   },
-}));
+  plugins: [
+    react(),
+    VitePWA({
+      registerType: 'autoUpdate',
+      includeAssets: ['images/*.png', 'images/*.jpg', 'images/*.webp'],
+      devOptions: {
+        enabled: true,
+      },
+      manifest: {
+        name: 'Kinga',
+        short_name: 'Kinga',
+        start_url: '.',
+        display: 'standalone',
+        background_color: '#fff',
+        theme_color: '#00c8ffff',
+        icons: [
+          {
+            src: '/192.png',
+            sizes: '192x192',
+            type: 'image/png',
+          },
+          {
+            src: '/512.png',
+            sizes: '512x512',
+            type: 'image/png',
+          },
+        ],
+
+        
+        screenshots: [
+    {
+      "src": "/desktop-screenshot.png",
+      "sizes": "1897x950",
+      "type": "image/png",
+      "form_factor": "wide"
+    },
+    {
+      "src": "public/mobile-screenshot.png",
+      "sizes": "599x816",
+      "type": "image/png",
+      "form_factor": "narrow"
+    }
+        
+        ]
+      },
+       workbox: {
+        globPatterns: ['**/*.{js,css,html,png,jpg,jpeg,webp,svg}'],
+        maximumFileSizeToCacheInBytes: 4 * 1024 * 1024, // ⬅️ 4MB
+      },
+    }),
+  ],
+});
