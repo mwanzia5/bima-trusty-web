@@ -120,21 +120,33 @@ All colors MUST be HSL.
 @layer components {
   /* Bima Custom Components */
   .bima-card {
-    @apply bg-card rounded-xl shadow-[var(--shadow-card)] border border-border/50 
-           transition-[var(--transition-smooth)] hover:shadow-[var(--shadow-button)]
-           hover:-translate-y-1;
+    @apply bg-card rounded-xl border border-border/50 hover:-translate-y-1;
+    box-shadow: var(--shadow-card);
+    transition: var(--transition-smooth);
+  }
+  
+  .bima-card:hover {
+    box-shadow: var(--shadow-button);
   }
 
   .bima-button-primary {
-    @apply bg-[var(--gradient-primary)] text-primary-foreground rounded-xl 
-           shadow-[var(--shadow-button)] transition-[var(--transition-bounce)]
-           hover:scale-105 hover:shadow-[var(--shadow-card)] active:scale-95;
+    @apply text-primary-foreground rounded-xl hover:scale-105 active:scale-95;
+    background: var(--gradient-primary);
+    box-shadow: var(--shadow-button);
+    transition: var(--transition-bounce);
+  }
+  
+  .bima-button-primary:hover {
+    box-shadow: var(--shadow-card);
   }
 
   .bima-button-secondary {
-    @apply bg-secondary text-secondary-foreground border border-border
-           rounded-xl transition-[var(--transition-smooth)]
-           hover:bg-accent hover:shadow-[var(--shadow-soft)];
+    @apply bg-secondary text-secondary-foreground border border-border rounded-xl hover:bg-accent;
+    transition: var(--transition-smooth);
+  }
+  
+  .bima-button-secondary:hover {
+    box-shadow: var(--shadow-soft);
   }
 
   .bima-hero-gradient {
@@ -164,7 +176,12 @@ All colors MUST be HSL.
   }
 
   .hover-lift {
-    @apply transition-[var(--transition-smooth)] hover:-translate-y-2 hover:shadow-[var(--shadow-card)];
+    @apply hover:-translate-y-2;
+    transition: var(--transition-smooth);
+  }
+  
+  .hover-lift:hover {
+    box-shadow: var(--shadow-card);
   }
 }
 
