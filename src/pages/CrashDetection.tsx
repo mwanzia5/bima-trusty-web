@@ -1,367 +1,419 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
-import { motion } from "framer-motion";
-import { animate, stagger } from "animejs";
-import { Car, Shield, Zap, AlertTriangle } from "lucide-react";
+import React, { useState, useEffect, useRef } from 'react';
 
-import { Button } from "../components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "../components/ui/card";
-import { Alert, AlertDescription, AlertTitle } from "../components/ui/alert";
-import { Badge } from "../components/ui/badge";
+interface CrashEvent {
+  id: string;
+  timestamp: string;
+  acceleration: {
+    x: number;
+    y: number;
+    z: number;
+  };
+  magnitude: number;
+  type: 'impact' | 'sudden-stop' | 'rollover';
+  confidence: number;
+}
 
-// ==============================
-// TYPES
-// ==============================
-type CrashData = {
-  id?: number;
-  timestamp: number;
-  acceleration: { x: number; y: number; z: number };
-  totalGForce: number;
-  sensitivity: number;
-  synced: boolean;
-};
-
-const CrashDetectionSystem: React.FC = () => {
-  // STATE
+const App: React.FC = () => {
   const [isMonitoring, setIsMonitoring] = useState(false);
+  const [acceleration, setAcceleration] = useState({ x: 0, y: 0, z: 0 });
   const [crashDetected, setCrashDetected] = useState(false);
-  const [sensitivity] = useState(2.5);
-  const [crashCount, setCrashCount] = useState(0);
-  const [lastCrashTime, setLastCrashTime] = useState("");
-  const [db, setDb] = useState<IDBDatabase | null>(null);
-  const [isOnline, setIsOnline] = useState(navigator.onLine);
-  const [syncStatus, setSyncStatus] = useState<"idle" | "syncing" | "synced" | "failed" | "offline">("idle");
-  const [queuedItems, setQueuedItems] = useState(0);
-
-  const titleRef = useRef<HTMLHeadingElement>(null);
-  const cardsRef = useRef<HTMLDivElement>(null);
-
-  // ==============================
-  // ANIMATIONS
-  // ==============================
-  useEffect(() => {
-    if (titleRef.current) {
-      animate(titleRef.current, {
-        translateY: [50, 0],
-        opacity: [0, 1],
-        duration: 1000,
-        easing: "easeOutQuad",
-        delay: 300,
-      });
-    }
-    if (cardsRef.current) {
-      animate(cardsRef.current.children, {
-        translateY: [30, 0],
-        opacity: [0, 1],
-        duration: 800,
-        delay: stagger(200, { start: 600 }),
-        easing: "easeOutQuad",
-      });
-    }
-  }, []);
-
-  // ==============================
-  // DB + NETWORK
-  // ==============================
-  const checkQueuedItems = (database: IDBDatabase) => {
-    const transaction = database.transaction(["crashes"], "readonly");
-    const store = transaction.objectStore("crashes");
-    const index = store.index("synced");
-    const request = index.count(IDBKeyRange.only(false));
-    request.onsuccess = () => setQueuedItems(request.result);
+  const [events, setEvents] = useState<CrashEvent[]>([]);
+  const [sensitivity, setSensitivity] = useState(2); // 1-5 scale
+  const [lastAcceleration, setLastAcceleration] = useState({ x: 0, y: 0, z: 0, timestamp: 0 });
+  const motionIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  
+  // Sensitivity thresholds (lower values = more sensitive)
+  const sensitivityLevels = {
+    1: { impact: 5, jerk: 20, duration: 100 },   // Very sensitive
+    2: { impact: 8, jerk: 30, duration: 150 },   // Sensitive
+    3: { impact: 12, jerk: 40, duration: 200 },  // Medium
+    4: { impact: 15, jerk: 50, duration: 250 },  // Less sensitive
+    5: { impact: 20, jerk: 60, duration: 300 }   // Least sensitive
   };
 
-  const loadCrashCount = (database: IDBDatabase) => {
-    const transaction = database.transaction(["crashes"], "readonly");
-    const store = transaction.objectStore("crashes");
-    const countRequest = store.count();
-    countRequest.onsuccess = () => setCrashCount(countRequest.result);
-  };
+  const currentThresholds = sensitivityLevels[sensitivity as keyof typeof sensitivityLevels];
 
-  const registerServiceWorker = async () => {
-    if ("serviceWorker" in navigator && "SyncManager" in window) {
-      try {
-        await navigator.serviceWorker.register("/sw.js");
-        console.log("Service Worker registered");
-      } catch (error) {
-        console.error("Service Worker registration failed:", error);
-      }
-    }
-  };
-
-  const syncCrashes = useCallback(async () => {
-    if (!db || !isOnline) return;
-    setSyncStatus("syncing");
-
+  // Save events to localStorage
+  const saveEvents = (newEvents: CrashEvent[]) => {
     try {
-      const transaction = db.transaction(["crashes"], "readwrite");
-      const store = transaction.objectStore("crashes");
-      const index = store.index("synced");
-      const request = index.getAll(IDBKeyRange.only(false));
+      localStorage.setItem('crashEvents', JSON.stringify(newEvents));
+    } catch (error) {
+      console.error('Failed to save events:', error);
+    }
+  };
 
-      const unsynced = await new Promise<CrashData[]>((resolve) => {
-        request.onsuccess = () => resolve(request.result as CrashData[]);
-      });
+  // Load events from localStorage
+  const loadEvents = () => {
+    try {
+      const savedEvents = localStorage.getItem('crashEvents');
+      if (savedEvents) {
+        const parsedEvents = JSON.parse(savedEvents);
+        setEvents(parsedEvents.slice(0, 15)); // Show last 15 events
+      }
+    } catch (error) {
+      console.error('Failed to load events:', error);
+    }
+  };
 
-      for (const crash of unsynced) {
-        try {
-          const response = await fetch("https://your-backend-api.com/crashes", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(crash),
-          });
+  const detectCrash = (currentAccel: { x: number; y: number; z: number }, timestamp: number): boolean => {
+    const magnitude = Math.sqrt(
+      Math.pow(currentAccel.x, 2) + 
+      Math.pow(currentAccel.y, 2) + 
+      Math.pow(currentAccel.z, 2)
+    );
 
-          if (response.ok) {
-            crash.synced = true;
-            store.put(crash);
-          }
-        } catch (err) {
-          console.error("Sync failed:", err);
+    // Method 1: Simple magnitude threshold (impact detection)
+    if (magnitude > currentThresholds.impact) {
+      return true;
+    }
+
+    // Method 2: Jerk detection (rate of change of acceleration)
+    if (lastAcceleration.timestamp > 0) {
+      const timeDiff = timestamp - lastAcceleration.timestamp;
+      if (timeDiff > 0) {
+        const jerkX = Math.abs(currentAccel.x - lastAcceleration.x) / (timeDiff / 1000);
+        const jerkY = Math.abs(currentAccel.y - lastAcceleration.y) / (timeDiff / 1000);
+        const jerkZ = Math.abs(currentAccel.z - lastAcceleration.z) / (timeDiff / 1000);
+        
+        const maxJerk = Math.max(jerkX, jerkY, jerkZ);
+        if (maxJerk > currentThresholds.jerk) {
+          return true;
         }
       }
-
-      setSyncStatus("synced");
-      setQueuedItems(0);
-    } catch (error) {
-      setSyncStatus("failed");
     }
-  }, [db, isOnline]);
 
-  const triggerBackgroundSync = useCallback(async () => {
-    if ("serviceWorker" in navigator && "SyncManager" in window) {
+    // Method 3: Sudden stop detection (rapid deceleration)
+    const previousMagnitude = Math.sqrt(
+      Math.pow(lastAcceleration.x, 2) + 
+      Math.pow(lastAcceleration.y, 2) + 
+      Math.pow(lastAcceleration.z, 2)
+    );
+
+    if (previousMagnitude > 5 && magnitude < 2 && timestamp - lastAcceleration.timestamp < currentThresholds.duration) {
+      return true;
+    }
+
+    return false;
+  };
+
+  const determineCrashType = (currentAccel: { x: number; y: number; z: number }, lastAccel: { x: number; y: number; z: number }): { type: string, confidence: number } => {
+    const magnitude = Math.sqrt(
+      Math.pow(currentAccel.x, 2) + 
+      Math.pow(currentAccel.y, 2) + 
+      Math.pow(currentAccel.z, 2)
+    );
+
+    // High magnitude suggests impact
+    if (magnitude > 12) {
+      return { type: 'impact', confidence: 0.8 };
+    }
+
+    // Check for rollover (sideways acceleration)
+    const lateralForce = Math.sqrt(Math.pow(currentAccel.x, 2) + Math.pow(currentAccel.y, 2));
+    if (lateralForce > 8 && Math.abs(currentAccel.z) < 5) {
+      return { type: 'rollover', confidence: 0.7 };
+    }
+
+    // Check for sudden stop
+    const previousMagnitude = Math.sqrt(
+      Math.pow(lastAccel.x, 2) + 
+      Math.pow(lastAccel.y, 2) + 
+      Math.pow(lastAccel.z, 2)
+    );
+    
+    if (previousMagnitude > 6 && magnitude < 3) {
+      return { type: 'sudden-stop', confidence: 0.6 };
+    }
+
+    return { type: 'impact', confidence: 0.5 };
+  };
+
+  const logCrashEvent = (currentAccel: { x: number; y: number; z: number }, lastAccel: { x: number; y: number; z: number }) => {
+    const timestamp = new Date().toISOString();
+    const magnitude = Math.sqrt(
+      Math.pow(currentAccel.x, 2) + 
+      Math.pow(currentAccel.y, 2) + 
+      Math.pow(currentAccel.z, 2)
+    );
+
+    const { type, confidence } = determineCrashType(currentAccel, lastAccel);
+
+    const newEvent: CrashEvent = {
+      id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
+      timestamp,
+      acceleration: { 
+        x: Math.round(currentAccel.x * 100) / 100, 
+        y: Math.round(currentAccel.y * 100) / 100, 
+        z: Math.round(currentAccel.z * 100) / 100 
+      },
+      magnitude: Math.round(magnitude * 100) / 100,
+      type: type as 'impact' | 'sudden-stop' | 'rollover',
+      confidence: Math.round(confidence * 100) / 100
+    };
+    
+    const updatedEvents = [newEvent, ...events.slice(0, 14)]; // Keep last 15 events
+    setEvents(updatedEvents);
+    saveEvents(updatedEvents);
+    console.log('Crash event logged:', newEvent);
+  };
+
+  const requestPermission = async (): Promise<boolean> => {
+    if (typeof (DeviceMotionEvent as any).requestPermission === 'function') {
       try {
-        const registration = await navigator.serviceWorker.ready;
-        await registration.sync.register("sync-crashes");
-        console.log("Background sync registered");
+        const permission = await (DeviceMotionEvent as any).requestPermission();
+        return permission === 'granted';
       } catch (error) {
-        console.error("Background sync failed:", error);
+        console.error('Permission request failed:', error);
+        return false;
       }
-    } else {
-      syncCrashes();
     }
-  }, [syncCrashes]);
+    return true;
+  };
 
-  // ==============================
-  // INIT EFFECT
-  // ==============================
+  const startMonitoring = async () => {
+    const hasPermission = await requestPermission();
+    if (!hasPermission) {
+      alert('Sensor access denied. Cannot monitor crashes.');
+      return;
+    }
+
+    setIsMonitoring(true);
+    setCrashDetected(false);
+    setLastAcceleration({ x: 0, y: 0, z: 0, timestamp: 0 });
+  };
+
+  const stopMonitoring = () => {
+    setIsMonitoring(false);
+    setCrashDetected(false);
+    if (motionIntervalRef.current) {
+      clearInterval(motionIntervalRef.current);
+      motionIntervalRef.current = null;
+    }
+  };
+
+  const clearEvents = () => {
+    setEvents([]);
+    localStorage.removeItem('crashEvents');
+  };
+
   useEffect(() => {
-    const initDB = async () => {
-      try {
-        const request = indexedDB.open("CrashDetectionDB", 2);
-        request.onupgradeneeded = (event) => {
-          const db = (event.target as IDBOpenDBRequest).result;
-          if (!db.objectStoreNames.contains("crashes")) {
-            const store = db.createObjectStore("crashes", {
-              keyPath: "id",
-              autoIncrement: true,
-            });
-            store.createIndex("timestamp", "timestamp", { unique: false });
-            store.createIndex("synced", "synced", { unique: false });
-          }
-        };
-        request.onsuccess = (event) => {
-          const database = (event.target as IDBOpenDBRequest).result;
-          setDb(database);
-          loadCrashCount(database);
-          checkQueuedItems(database);
-        };
-      } catch (error) {
-        console.error("DB init failed:", error);
+    loadEvents();
+  }, []);
+
+  useEffect(() => {
+    if (!isMonitoring) return;
+
+    const handleMotionEvent = (event: DeviceMotionEvent) => {
+      if (!event.accelerationIncludingGravity) return;
+
+      const currentTime = Date.now();
+      const currentAccel = {
+        x: event.accelerationIncludingGravity.x || 0,
+        y: event.accelerationIncludingGravity.y || 0,
+        z: event.accelerationIncludingGravity.z || 0
+      };
+
+      setAcceleration({
+        x: Math.round(currentAccel.x * 100) / 100,
+        y: Math.round(currentAccel.y * 100) / 100,
+        z: Math.round(currentAccel.z * 100) / 100
+      });
+
+      // Detect crash using multiple methods
+      if (detectCrash(currentAccel, currentTime) && !crashDetected) {
+        logCrashEvent(currentAccel, lastAcceleration);
+        setCrashDetected(true);
+        setTimeout(() => setCrashDetected(false), 3000);
       }
+
+      // Update last acceleration for jerk calculation
+      setLastAcceleration({
+        x: currentAccel.x,
+        y: currentAccel.y,
+        z: currentAccel.z,
+        timestamp: currentTime
+      });
     };
 
-    const handleOnline = () => {
-      setIsOnline(true);
-      setSyncStatus("syncing");
-      triggerBackgroundSync();
-    };
-    const handleOffline = () => {
-      setIsOnline(false);
-      setSyncStatus("offline");
-    };
+    window.addEventListener('devicemotion', handleMotionEvent);
 
-    window.addEventListener("online", handleOnline);
-    window.addEventListener("offline", handleOffline);
-
-    initDB();
-    registerServiceWorker();
+    // Add vibration feedback for testing
+    motionIntervalRef.current = setInterval(() => {
+      // Optional: Add periodic checks or feedback
+    }, 100);
 
     return () => {
-      window.removeEventListener("online", handleOnline);
-      window.removeEventListener("offline", handleOffline);
+      window.removeEventListener('devicemotion', handleMotionEvent);
+      if (motionIntervalRef.current) {
+        clearInterval(motionIntervalRef.current);
+        motionIntervalRef.current = null;
+      }
     };
-  }, [triggerBackgroundSync]);
+  }, [isMonitoring, crashDetected, sensitivity, lastAcceleration]);
 
-  // ==============================
-  // CRASH HANDLING
-  // ==============================
-  const saveCrashData = (acceleration: { x: number; y: number; z: number }, timestamp: number) => {
-    if (!db) return;
-    const transaction = db.transaction(["crashes"], "readwrite");
-    const store = transaction.objectStore("crashes");
-    const crashData: CrashData = {
-      timestamp,
-      acceleration,
-      totalGForce: Math.sqrt(acceleration.x ** 2 + acceleration.y ** 2 + acceleration.z ** 2),
-      sensitivity,
-      synced: false,
-    };
-    store.add(crashData);
-
-    transaction.oncomplete = () => {
-      setCrashCount((prev) => prev + 1);
-      setQueuedItems((prev) => prev + 1);
-      setLastCrashTime(new Date(timestamp).toLocaleString());
-      if (isOnline) triggerBackgroundSync();
-    };
-  };
-
-  const handleDeviceMotion = (event: DeviceMotionEvent) => {
-    if (!event.accelerationIncludingGravity) return;
-    const { x, y, z } = event.accelerationIncludingGravity;
-    const timestamp = Date.now();
-    const gForce = Math.sqrt((x || 0) ** 2 + (y || 0) ** 2 + (z || 0) ** 2);
-
-    if (gForce > sensitivity) {
-      setCrashDetected(true);
-      saveCrashData({ x: x || 0, y: y || 0, z: z || 0 }, timestamp);
-      setTimeout(() => setCrashDetected(false), 5000);
+  const getCrashTypeColor = (type: string) => {
+    switch (type) {
+      case 'impact': return 'bg-red-100 border-red-300';
+      case 'sudden-stop': return 'bg-yellow-100 border-yellow-300';
+      case 'rollover': return 'bg-orange-100 border-orange-300';
+      default: return 'bg-gray-100 border-gray-300';
     }
   };
 
-  const toggleMonitoring = () => {
-    if (isMonitoring) {
-      window.removeEventListener("devicemotion", handleDeviceMotion as EventListener);
-      setIsMonitoring(false);
-    } else {
-      Notification.requestPermission();
-      window.addEventListener("devicemotion", handleDeviceMotion as EventListener);
-      setIsMonitoring(true);
+  const getCrashTypeEmoji = (type: string) => {
+    switch (type) {
+      case 'impact': return '💥';
+      case 'sudden-stop': return '🛑';
+      case 'rollover': return '🔄';
+      default: return '⚠️';
     }
   };
-
-  // ==============================
-  // UI
-  // ==============================
-  const features = [
-    {
-      icon: <Car className="w-8 h-8 text-primary" />,
-      title: "Real-time Monitoring",
-      description: "Advanced sensors detect impact patterns instantly.",
-    },
-    {
-      icon: <Shield className="w-8 h-8 text-primary" />,
-      title: "Emergency Response",
-      description: "Immediate notification to emergency services and contacts.",
-    },
-    {
-      icon: <Zap className="w-8 h-8 text-primary" />,
-      title: "AI-Powered Analysis",
-      description: "Machine learning separates minor bumps from crashes.",
-    },
-    {
-      icon: <AlertTriangle className="w-8 h-8 text-primary" />,
-      title: "Preventive Alerts",
-      description: "Proactive warnings about risky conditions.",
-    },
-  ];
 
   return (
-    <div className="min-h-screen bg-background">
-      {/* Hero */}
-      <section className="relative py-20 overflow-hidden">
-        <div className="relative max-w-6xl mx-auto px-4 text-center">
-          <motion.div
-            initial={{ scale: 0.8, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            transition={{ duration: 0.6 }}
-            className="mb-8"
-          >
-            <div className="inline-flex items-center justify-center w-20 h-20 bg-primary/10 rounded-full mb-6">
-              <Car className="w-10 h-10 text-primary" />
-            </div>
-          </motion.div>
-          <h1 ref={titleRef} className="text-5xl md:text-7xl font-bold mb-8 opacity-0">
-            Crash Detection <span className="text-foreground">System</span>
-          </h1>
+    <div className="min-h-screen bg-gray-100 flex flex-col items-center justify-center p-4">
+      <h1 className="text-2xl font-bold mb-4 text-gray-800">Advanced Crash Detector</h1>
+      
+      {/* Sensitivity Controls */}
+      <div className="bg-white p-4 rounded shadow-md mb-4 w-full max-w-md">
+        <h2 className="text-lg font-semibold mb-2">Sensitivity Level: {sensitivity}/5</h2>
+        <div className="flex space-x-2 mb-2">
+          {[1, 2, 3, 4, 5].map(level => (
+            <button
+              key={level}
+              onClick={() => setSensitivity(level)}
+              className={`flex-1 py-2 px-3 rounded text-sm ${
+                sensitivity === level 
+                  ? 'bg-blue-500 text-white' 
+                  : 'bg-gray-200 text-gray-700'
+              }`}
+            >
+              {level}
+            </button>
+          ))}
         </div>
-      </section>
+        <p className="text-sm text-gray-600">
+          {sensitivity === 1 ? 'Very Sensitive' : 
+           sensitivity === 2 ? 'Sensitive' : 
+           sensitivity === 3 ? 'Medium' : 
+           sensitivity === 4 ? 'Less Sensitive' : 'Least Sensitive'}
+        </p>
+      </div>
 
-      {/* Features */}
-      <section className="py-20 bg-secondary/30">
-        <div className="max-w-6xl mx-auto px-4">
-          <h2 className="text-4xl font-bold mb-12 text-center">Features</h2>
-          <div ref={cardsRef} className="grid md:grid-cols-2 lg:grid-cols-4 gap-8">
-            {features.map((f, i) => (
-              <motion.div
-                key={i}
-                whileHover={{ y: -8 }}
-                className="p-8 text-center opacity-0 border rounded-lg bg-card"
-              >
-                <div className="inline-flex items-center justify-center w-16 h-16 bg-primary/10 rounded-full mb-6">
-                  {f.icon}
-                </div>
-                <h3 className="text-xl font-semibold mb-4">{f.title}</h3>
-                <p className="text-muted-foreground">{f.description}</p>
-              </motion.div>
-            ))}
+      {/* Monitoring Controls */}
+      <div className="flex space-x-4 mb-6">
+        {!isMonitoring ? (
+          <button
+            onClick={startMonitoring}
+            className="bg-green-500 hover:bg-green-700 text-white font-bold py-2 px-6 rounded"
+          >
+            Start Monitoring
+          </button>
+        ) : (
+          <button
+            onClick={stopMonitoring}
+            className="bg-red-500 hover:bg-red-700 text-white font-bold py-2 px-6 rounded"
+          >
+            Stop Monitoring
+          </button>
+        )}
+        <button
+          onClick={clearEvents}
+          className="bg-gray-500 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded"
+        >
+          Clear Events
+        </button>
+      </div>
+
+      {/* Current Acceleration Display */}
+      {isMonitoring && (
+        <div className="bg-white p-4 rounded shadow-md mb-4 w-full max-w-md">
+          <h2 className="text-lg font-semibold mb-2">Current Acceleration</h2>
+          <div className="grid grid-cols-3 gap-2">
+            <div className="text-center">
+              <div className="text-sm text-gray-600">X</div>
+              <div className="font-mono">{acceleration.x} m/s²</div>
+            </div>
+            <div className="text-center">
+              <div className="text-sm text-gray-600">Y</div>
+              <div className="font-mono">{acceleration.y} m/s²</div>
+            </div>
+            <div className="text-center">
+              <div className="text-sm text-gray-600">Z</div>
+              <div className="font-mono">{acceleration.z} m/s²</div>
+            </div>
           </div>
         </div>
-      </section>
+      )}
 
-      {/* Dashboard */}
-      <div className="max-w-4xl mx-auto p-6">
-        <Card className="mb-6">
-          <CardHeader>
-            <CardTitle className="text-2xl font-bold">Crash Detection Dashboard</CardTitle>
-            <CardDescription>Monitor motion, detect crashes, and sync evidence</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="flex gap-4 flex-wrap mb-4">
-              <Button
-                onClick={toggleMonitoring}
-                variant={isMonitoring ? "destructive" : "default"}
-              >
-                {isMonitoring ? "Stop Monitoring" : "Start Monitoring"}
-              </Button>
-              <Button
-                onClick={() => syncCrashes()}
-                disabled={!isOnline || queuedItems === 0}
-              >
-                Sync Now ({queuedItems})
-              </Button>
-            </div>
-            {crashDetected && (
-              <Alert variant="destructive">
-                <AlertTitle>Crash Detected!</AlertTitle>
-                <AlertDescription>
-                  Crash evidence saved {isOnline ? "and queued for sync" : "locally"}.
-                </AlertDescription>
-              </Alert>
-            )}
-            <div className="mt-4 space-y-2">
-              <p>
-                Total Crashes: <strong>{crashCount}</strong>
-              </p>
-              {lastCrashTime && (
-                <p>
-                  Last Crash: <strong>{lastCrashTime}</strong>
-                </p>
-              )}
-              <p>
-                Sync Status: <Badge>{syncStatus}</Badge>
-              </p>
-            </div>
-          </CardContent>
-        </Card>
+      {/* Crash Detection Alert */}
+      {crashDetected && (
+        <div className="bg-red-200 border border-red-400 text-red-700 px-6 py-4 rounded mb-4 animate-pulse">
+          <div className="flex items-center">
+            <span className="text-2xl mr-2">🚨</span>
+            <span className="font-bold">CRASH DETECTED!</span>
+          </div>
+          <p className="text-sm">Evidence has been recorded</p>
+        </div>
+      )}
+
+      {/* Events List */}
+      <div className="w-full max-w-md">
+        <div className="flex justify-between items-center mb-2">
+          <h2 className="text-lg font-semibold">Recent Events ({events.length})</h2>
+          <span className="text-sm text-gray-500">Sensitivity: {sensitivity}</span>
+        </div>
+        
+        {events.length === 0 ? (
+          <div className="bg-white p-6 rounded shadow-md text-center">
+            <p className="text-gray-500">No crashes detected yet</p>
+            <p className="text-sm text-gray-400 mt-2">Try shaking your device or changing sensitivity</p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {events.map((event) => (
+              <div key={event.id} className={`border rounded p-3 ${getCrashTypeColor(event.type)}`}>
+                <div className="flex justify-between items-start mb-2">
+                  <div className="flex items-center">
+                    <span className="text-lg mr-2">{getCrashTypeEmoji(event.type)}</span>
+                    <span className="font-medium capitalize">{event.type}</span>
+                  </div>
+                  <span className="text-sm text-gray-500">
+                    {new Date(event.timestamp).toLocaleTimeString()}
+                  </span>
+                </div>
+                
+                <div className="grid grid-cols-2 gap-2 text-sm">
+                  <div>
+                    <span className="text-gray-600">Magnitude: </span>
+                    <span className="font-mono">{event.magnitude} m/s²</span>
+                  </div>
+                  <div>
+                    <span className="text-gray-600">Confidence: </span>
+                    <span className="font-mono">{event.confidence}</span>
+                  </div>
+                </div>
+                
+                <div className="text-xs text-gray-500 mt-2">
+                  Accel: ({event.acceleration.x.toFixed(1)}, {event.acceleration.y.toFixed(1)}, {event.acceleration.z.toFixed(1)})
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Instructions */}
+      <div className="mt-6 p-4 bg-blue-50 rounded-lg max-w-md">
+        <h3 className="font-semibold text-blue-800 mb-2">Testing Instructions:</h3>
+        <ul className="text-sm text-blue-700 space-y-1">
+          <li>• Set sensitivity to 1-2 for light shakes</li>
+          <li>• Set sensitivity to 3-4 for moderate impacts</li>
+          <li>• Set sensitivity to 5 for severe crashes only</li>
+          <li>• Try sudden stops, sharp turns, or phone drops</li>
+        </ul>
       </div>
     </div>
   );
 };
 
-export default CrashDetectionSystem;
+export default App;
