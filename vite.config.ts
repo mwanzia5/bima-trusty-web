@@ -18,8 +18,8 @@ export default defineConfig({
         enabled: true,
       },
       manifest: {
-        name: 'Kinga',
-        short_name: 'Kinga',
+        name: 'Bima',
+        short_name: 'Bima',
         start_url: '.',
         display: 'standalone',
         background_color: '#fff',
@@ -40,14 +40,14 @@ export default defineConfig({
         
         screenshots: [
     {
-      "src": "/desktop-screenshot.png",
-      "sizes": "1897x950",
+      "src": "/Desktop.png",
+      "sizes": "1280x644",
       "type": "image/png",
       "form_factor": "wide"
     },
     {
-      "src": "public/mobile-screenshot.png",
-      "sizes": "599x816",
+      "src": "/mobile.png",
+      "sizes": "457x662",
       "type": "image/png",
       "form_factor": "narrow"
     }
