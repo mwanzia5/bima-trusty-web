@@ -41,7 +41,7 @@ export default defineConfig({
         screenshots: [
     {
       "src": "/Desktop.png",
-      "sizes": "1280x644",
+      "sizes": "1280x664",
       "type": "image/png",
       "form_factor": "wide"
     },
