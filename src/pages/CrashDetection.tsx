@@ -24,12 +24,12 @@ const App: React.FC = () => {
   
   // Sensitivity thresholds (lower values = more sensitive)
   const sensitivityLevels = {
-    1: { impact: 5, jerk: 20, duration: 100 },   // Very sensitive
-    2: { impact: 8, jerk: 30, duration: 150 },   // Sensitive
-    3: { impact: 12, jerk: 40, duration: 200 },  // Medium
-    4: { impact: 15, jerk: 50, duration: 250 },  // Less sensitive
-    5: { impact: 20, jerk: 60, duration: 300 }   // Least sensitive
-  };
+  1: { impact: 15, jerk: 40, duration: 200 },  
+  2: { impact: 18, jerk: 50, duration: 250 },  
+  3: { impact: 20, jerk: 60, duration: 300 },  
+  4: { impact: 22, jerk: 70, duration: 350 },  
+  5: { impact: 25, jerk: 80, duration: 400 }   
+};
 
   const currentThresholds = sensitivityLevels[sensitivity as keyof typeof sensitivityLevels];
 
